@@ -1,0 +1,126 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      image-artifact-id:
+        description: Tested container archive from this run
+        value: ${{ jobs.container.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  workflows:
+    name: Validate workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate workflow syntax and expressions
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color .github/workflows/ci.yml .github/workflows/release.yml
+
+  checks:
+    name: Tests, types, lint and PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: trueid_ci
+          POSTGRES_PASSWORD: ephemeral_ci_only
+          POSTGRES_DB: trueid_ci
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U trueid_ci -d trueid_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          npm install --global npm@11.4.2
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Existing complete check
+        run: npm run check
+      - name: Runtime dependency advisory check
+        run: npm audit --omit=dev --audit-level=high
+      - name: Real PostgreSQL integration checks
+        env:
+          TRUEID_TEST_DATABASE_URL: postgresql://trueid_ci:ephemeral_ci_only@127.0.0.1:55432/trueid_ci
+        run: npm run test:postgres
+
+  container:
+    name: Build and smoke-test container
+    needs: [checks, workflows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      artifact-id: ${{ steps.artifact.outputs.artifact-id }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: trueid_ci
+          POSTGRES_PASSWORD: ephemeral_ci_only
+          POSTGRES_DB: trueid_ci
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U trueid_ci -d trueid_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://trueid_ci:ephemeral_ci_only@127.0.0.1:55432/trueid_ci
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pilot image
+        run: docker build --pull --build-arg SOURCE_REVISION="$GITHUB_SHA" --tag "trueid-backend:$GITHUB_SHA" .
+      - name: Check image excludes local secrets and development dependencies
+        run: |
+          docker run --rm --network none "trueid-backend:$GITHUB_SHA" node -e '
+            const fs = require("node:fs");
+            if (process.getuid() === 0) process.exit(1);
+            for (const path of [".env", ".env.test", "test-keys", "partner-keys", ".git", "tests", "node_modules/typescript", "node_modules/@electric-sql/pglite"]) {
+              if (fs.existsSync(path)) process.exit(1);
+            }
+          '
+      - name: Migrate and start the exact image under test
+        run: |
+          docker run --rm --network host --read-only --cap-drop ALL --security-opt no-new-privileges --env DATABASE_URL --env NODE_ENV "trueid-backend:$GITHUB_SHA" node dist/scripts/migrate.js
+          docker run --detach --name trueid-ci-api --network host --read-only --cap-drop ALL --security-opt no-new-privileges --env DATABASE_URL --env NODE_ENV "trueid-backend:$GITHUB_SHA"
+      - name: Check readiness, liveness and anonymous denial
+        run: docker exec trueid-ci-api node dist/scripts/smoke-runtime.js
+      - name: Stop smoke container
+        if: always()
+        run: docker rm --force trueid-ci-api >/dev/null 2>&1 || true
+      - name: Save tested image and content hash
+        run: |
+          mkdir -p release
+          docker save --output release/image.tar "trueid-backend:$GITHUB_SHA"
+          docker image inspect --format '{{.Id}}' "trueid-backend:$GITHUB_SHA" > release/image-id.txt
+          cd release
+          sha256sum image.tar > image.tar.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: artifact
+        with:
+          name: pilot-image-${{ github.sha }}-${{ github.run_attempt }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

@@ -1,0 +1,19 @@
+# Only source needed to build this service may enter a Docker build context.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.build.json
+!src/
+!src/**
+!scripts/
+!scripts/**
+!migrations/
+!migrations/*.sql
+# Defense in depth, including files accidentally placed below allowed folders.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/test-keys/**
+**/partner-keys/**

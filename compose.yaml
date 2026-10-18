@@ -1,0 +1,21 @@
+# Optional LOCAL database. Never use these credentials for production.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: trueid
+      POSTGRES_USER: trueid
+      POSTGRES_PASSWORD: trueid_local_test_only
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - trueid_local_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trueid -d trueid"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  trueid_local_pg:

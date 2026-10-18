@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-test/
+.cache/
+.env
+.env.*
+!.env.example
+coverage/
+*.tsbuildinfo
+*.log
+test-keys/
+partner-keys/
+release/
