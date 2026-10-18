@@ -1,5 +1,5 @@
 # Pilot artifact only. Production configuration remains rejected by the app.
-FROM node:24-bookworm-slim AS dependencies
+FROM node:26-bookworm-slim AS dependencies
 WORKDIR /app
 RUN npm install --global npm@11.4.2
 COPY package.json package-lock.json ./
@@ -14,7 +14,7 @@ RUN npm run build
 FROM dependencies AS runtime-dependencies
 RUN npm prune --omit=dev --ignore-scripts --no-audit --no-fund
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 WORKDIR /app
 ARG SOURCE_REVISION=local
 LABEL org.opencontainers.image.title="TrueID backend pilot"
