@@ -282,3 +282,5 @@ Implementation references: [Nest validation](https://docs.nestjs.com/techniques/
 [node-postgres transactions](https://node-postgres.com/features/transactions),
 [PostgreSQL constraints](https://www.postgresql.org/docs/17/ddl-constraints.html).
 Local checks do not establish production security or regulatory compliance.
+#   T I D - b a c k e n d  
+ 
